@@ -8,6 +8,7 @@ export const mongoTransactionsEnabled = process.env.MONGODB_TRANSACTIONS
 let warned = false;
 export async function withMongoTransaction<T>(work: (session: ClientSession | null) => Promise<T>) {
   if (!mongoTransactionsEnabled) {
+    if (process.env.NODE_ENV === "production") throw new Error("MongoDB transactions must be enabled in production; use Atlas or a replica set");
     if (!warned) {
       console.warn("MongoDB transactions are disabled for local standalone development. Use Atlas or a replica set in production.");
       warned = true;
