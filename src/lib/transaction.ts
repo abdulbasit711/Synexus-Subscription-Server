@@ -1,4 +1,5 @@
-import mongoose, { type ClientSession } from "mongoose";
+import { type ClientSession } from "mongoose";
+import { connectDb } from "./db";
 
 const uri = String(process.env.MONGODB_URI || "");
 export const mongoTransactionsEnabled = process.env.MONGODB_TRANSACTIONS
@@ -13,10 +14,12 @@ export async function withMongoTransaction<T>(work: (session: ClientSession | nu
       console.warn("MongoDB transactions are disabled for local standalone development. Use Atlas or a replica set in production.");
       warned = true;
     }
+    await connectDb();
     return work(null);
   }
 
-  const session = await mongoose.startSession();
+  const connected = await connectDb();
+  const session = await connected.connection.startSession();
   try {
     let result!: T;
     await session.withTransaction(async () => { result = await work(session); });

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { getAdminSession } from "@/lib/admin-auth";
-import { connectDb } from "@/lib/db";
+import { connectDb, DatabaseUnavailableError } from "@/lib/db";
 import { Business, Plan, SubscriptionEvent, Installation, ManualPayment } from "@/lib/models";
 import { withMongoTransaction } from "@/lib/transaction";
 import { fail, ok } from "@/lib/http";
@@ -35,7 +35,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ busin
       await SubscriptionEvent.create([{ businessId, type: "contract_adjusted", actorType: "admin", actorId: admin.sub, reason: input.reason, before, after: business.toObject() }], { session: session || undefined });
       return business;
     }));
-  } catch (error) { return fail(error instanceof Error ? error.message : "Update failed"); }
+  } catch (error) { return fail(error instanceof Error ? error.message : "Update failed", error instanceof DatabaseUnavailableError ? 503 : 400); }
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ businessId: string }> }) {
