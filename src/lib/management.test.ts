@@ -10,7 +10,7 @@ import { claimInstallation, completeProvisioning, provisioningManifest } from '.
 import { issueEntitlement } from './entitlements';
 import { createActivationCode } from './activation-codes';
 import { withMongoTransaction } from './transaction';
-import { backupHost, configureBackup, machineBackupDestination } from './backup';
+import { backupHost, configureBackup, machineBackupDestination, viewBackupDestination } from './backup';
 import { POST as installationBackup } from '../app/api/v1/installations/backup/route';
 
 test('upgrade price differences and support boundaries', () => {
@@ -83,12 +83,15 @@ integration('Synexus transactions and provisioning', () => {
     assert.ok(privateRow!.backupUriEncrypted); assert.notEqual(privateRow!.backupUriEncrypted, uri);
     assert.equal('backupUriEncrypted' in (await Business.findById(a.business._id).lean())!, false);
     assert.deepEqual(await machineBackupDestination(a.business._id), { uri, database: 'client_a' });
+    assert.deepEqual(await viewBackupDestination(String(a.business._id), actor), { uri, database: 'client_a', enabled: true });
+    assert.equal(await SubscriptionEvent.countDocuments({ businessId: a.business._id, type: 'backup_destination_viewed', actorId: actor }), 1);
     await assert.rejects(configureBackup(String(b.business._id), { ...input, database: 'client_b' }, actor), /another client/);
     await configureBackup(String(b.business._id), { ...input, uri: uri.replace('client-a', 'client-b'), database: 'client_b' }, actor);
     assert.equal((await machineBackupDestination(b.business._id)).database, 'client_b');
     const events = await SubscriptionEvent.find({ businessId: a.business._id });
     assert.equal(JSON.stringify(events).includes('private-password'), false);
     await configureBackup(String(a.business._id), { ...input, uri: undefined, enabled: false }, actor);
+    assert.equal((await viewBackupDestination(String(a.business._id), actor)).uri, uri);
     await assert.rejects(machineBackupDestination(a.business._id), /Configure/);
     await Business.updateOne({ _id: b.business._id }, { $set: { configuredStatus: 'suspended' } });
     await assert.rejects(machineBackupDestination(b.business._id), /not active/);

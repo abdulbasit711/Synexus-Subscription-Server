@@ -29,8 +29,9 @@ Online checkout and EasyPaisa callbacks are disabled (HTTP 410).
 
 Premium includes weekly cloud backups; Enterprise includes daily backups. Owners
 configure each client's dedicated Atlas SRV connection and database in Manage.
-Connections are encrypted, and only that business's authenticated installation
-can retrieve its destination. See `../docs/cloud-backups.md` for deployment and
+Connections are encrypted. Synexus owners can explicitly reveal the saved URI
+and database in Manage; each view is audited. That business's authenticated
+installation can retrieve its destination. See `../docs/cloud-backups.md` for deployment and
 recovery instructions.
 
 `npm test` runs unit tests. `node ../scripts/test-synexus.mjs` from this directory

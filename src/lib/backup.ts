@@ -35,3 +35,14 @@ export async function machineBackupDestination(businessId: unknown) {
   if (!business.backupEnabled || !business.backupUriEncrypted || !business.backupDatabase) throw new Error('Configure this client’s backup destination in Synexus');
   return { uri: decryptSecret(business.backupUriEncrypted), database: business.backupDatabase };
 }
+export async function viewBackupDestination(businessId: string, actorId: string) {
+  return withMongoTransaction(async session => {
+    const business = await Business.findById(businessId).select('+backupUriEncrypted').session(session);
+    if (!business || business.deletedAt) throw new Error('Business not found or deleted');
+    if (!business.backupUriEncrypted) throw new Error('No Atlas connection is saved for this client');
+    const uri = decryptSecret(business.backupUriEncrypted);
+    await SubscriptionEvent.create([{ businessId, type: 'backup_destination_viewed', actorType: 'admin', actorId,
+      after: { host: business.backupHost, database: business.backupDatabase } }], { session: session || undefined });
+    return { uri, database: business.backupDatabase, enabled: business.backupEnabled };
+  });
+}
