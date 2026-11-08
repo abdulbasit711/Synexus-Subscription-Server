@@ -10,6 +10,8 @@ import { claimInstallation, completeProvisioning, provisioningManifest } from '.
 import { issueEntitlement } from './entitlements';
 import { createActivationCode } from './activation-codes';
 import { withMongoTransaction } from './transaction';
+import { backupHost, configureBackup, machineBackupDestination } from './backup';
+import { POST as installationBackup } from '../app/api/v1/installations/backup/route';
 
 test('upgrade price differences and support boundaries', () => {
   assert.equal(upgradeCharge(20000, 35000), 15000); assert.equal(upgradeCharge(20000, 50000), 30000);
@@ -27,7 +29,7 @@ test('blank legacy catalogs supply included plan features while explicit selecti
   assert.deepEqual(planFeatures({ key: 'basic', features: [] }), []);
   assert.deepEqual(planFeatures({ key: 'premium', features: [] }), PREMIUM_FEATURES);
   assert.deepEqual(planFeatures({ key: 'enterprise' }), ENTERPRISE_FEATURES);
-  assert.deepEqual(planFeatures({ key: 'premium', features: ['advancedReports'] }), ['advancedReports']);
+  assert.deepEqual(planFeatures({ key: 'premium', features: ['advancedReports'] }), ['advancedReports', 'cloudBackup']);
 });
 const integration = process.env.MONGODB_URI?.includes('/pandas_license_test_') ? describe : describe.skip;
 integration('Synexus transactions and provisioning', () => {
@@ -55,7 +57,7 @@ integration('Synexus transactions and provisioning', () => {
       assert.equal(repaired.name, 'Negotiated Premium'); assert.equal(repaired.installationPrice, 29000);
       assert.equal(repaired.annualPrice, 13000); assert.equal(repaired.userLimit, 5);
       await Plan.updateOne({ key: 'premium' }, { $set: { features: ['advancedReports'] } });
-      await ensureDefaultPlans(); assert.deepEqual([...(await Plan.findOne({ key: 'premium' }))!.features], ['advancedReports']);
+      await ensureDefaultPlans(); assert.deepEqual([...(await Plan.findOne({ key: 'premium' }))!.features], ['advancedReports', 'cloudBackup']);
     } finally { await Plan.replaceOne({ key: 'premium' }, original); }
   });
   test('signed entitlements include all plan features even before a blank legacy catalog is repaired', async () => {
@@ -67,6 +69,47 @@ integration('Synexus transactions and provisioning', () => {
         assert.deepEqual((await issueEntitlement(installationId)).entitlement.features, expected);
       } finally { await Plan.updateOne({ key: planKey }, { $set: { features: original } }); }
     }
+  });
+  test('per-client Atlas destinations are encrypted, private, isolated and unavailable to Basic or suspended agreements', async () => {
+    process.env.SESSION_SECRET ||= 'isolated-synexus-backup-encryption-secret';
+    const a = await register({ planKey: 'premium' }), b = await register({ planKey: 'enterprise' });
+    const uri = 'mongodb+srv://client-user:private-password@client-a.mongodb.net/';
+    assert.equal(backupHost(uri), 'client-a.mongodb.net');
+    assert.throws(() => backupHost('mongodb://user:password@localhost'), /Atlas/);
+    const input = { enabled: true, uri, database: 'client_a', reason: 'Assign dedicated client cluster' };
+    const saved = await configureBackup(String(a.business._id), input, actor);
+    assert.equal(saved.configured, true); assert.equal('uri' in saved, false);
+    const privateRow = await Business.findById(a.business._id).select('+backupUriEncrypted');
+    assert.ok(privateRow!.backupUriEncrypted); assert.notEqual(privateRow!.backupUriEncrypted, uri);
+    assert.equal('backupUriEncrypted' in (await Business.findById(a.business._id).lean())!, false);
+    assert.deepEqual(await machineBackupDestination(a.business._id), { uri, database: 'client_a' });
+    await assert.rejects(configureBackup(String(b.business._id), { ...input, database: 'client_b' }, actor), /another client/);
+    await configureBackup(String(b.business._id), { ...input, uri: uri.replace('client-a', 'client-b'), database: 'client_b' }, actor);
+    assert.equal((await machineBackupDestination(b.business._id)).database, 'client_b');
+    const events = await SubscriptionEvent.find({ businessId: a.business._id });
+    assert.equal(JSON.stringify(events).includes('private-password'), false);
+    await configureBackup(String(a.business._id), { ...input, uri: undefined, enabled: false }, actor);
+    await assert.rejects(machineBackupDestination(a.business._id), /Configure/);
+    await Business.updateOne({ _id: b.business._id }, { $set: { configuredStatus: 'suspended' } });
+    await assert.rejects(machineBackupDestination(b.business._id), /not active/);
+    const basic = await register(); await assert.rejects(machineBackupDestination(basic.business._id), /Premium/);
+  });
+  test('backup credentials are delivered only to the matching authenticated active installation', async () => {
+    process.env.SESSION_SECRET ||= 'isolated-synexus-backup-encryption-secret';
+    const created = await register({ planKey: 'premium' });
+    await configureBackup(String(created.business._id), { enabled: true, uri: 'mongodb+srv://user:password@machine-client.mongodb.net/', database: 'machine_client', reason: 'Machine backup test' }, actor);
+    const installationId = await claim(created.activationCode).execute();
+    const request = () => {
+      const body = '{}', timestamp = String(Date.now()), nonce = randomUUID();
+      const signature = sign(null, Buffer.from(`${timestamp}.${nonce}.${createHash('sha256').update(body).digest('hex')}`), pair.privateKey).toString('base64url');
+      return new NextRequest('https://example.test/api/v1/installations/backup', { method: 'POST', body, headers: { 'x-installation-id': installationId, 'x-timestamp': timestamp, 'x-nonce': nonce, 'x-signature': signature } });
+    };
+    const response = await installationBackup(request()); assert.equal(response.status, 200);
+    assert.equal(response.headers.get('Cache-Control'), 'no-store');
+    assert.equal((await response.json()).data.database, 'machine_client');
+    assert.equal((await installationBackup(new NextRequest('https://example.test', { method: 'POST', body: '{}', headers: { 'x-installation-id': installationId } }))).status, 401);
+    await Installation.updateOne({ _id: installationId }, { $set: { status: 'revoked' } });
+    assert.equal((await installationBackup(request())).status, 401);
   });
   test('registration redacts bootstrap hash; activation starts exactly one included support year', async () => {
     const created = await register(); assert.equal('ownerBootstrap' in created.business, false);

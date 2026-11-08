@@ -12,6 +12,8 @@ const planSchema = new Schema({
 }, { timestamps: true });
 
 const businessSchema = new Schema({
+  backupUriEncrypted: { type: String, select: false },
+  backupHost: { type: String }, backupDatabase: { type: String, default: "" }, backupEnabled: { type: Boolean, default: false },
   deletedAt: { type: Date, default: null },
   contractVersion: { type: Number, default: 1 }, region: { type: String, default: "" },
   provisioningMode: { type: String, enum: ["provision", "enroll"], default: "enroll" },
@@ -30,6 +32,8 @@ const businessSchema = new Schema({
   grantedAddOns: { type: [String], default: [] }, userLimit: { type: Number, min: 1, default: 1 },
   agreementNotes: { type: String, default: "" }, activeInstallationId: { type: Schema.Types.ObjectId, ref: "Installation", default: null }
 }, { timestamps: true });
+
+businessSchema.index({ backupHost: 1 }, { unique: true, partialFilterExpression: { backupHost: { $type: "string" }, deletedAt: null } });
 
 const installationSchema = new Schema({
   protocolVersion: { type: Number, default: 1 }, deploymentId: { type: String, default: "" },

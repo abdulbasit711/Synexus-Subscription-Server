@@ -37,7 +37,7 @@ export async function registerBusiness(input: z.infer<typeof registrationSchema>
 }
 export function publicBusiness(value: { toObject?: () => unknown } | unknown) {
   const row = (value && typeof value === "object" && "toObject" in value && typeof value.toObject === "function" ? value.toObject() : value) as Record<string, unknown>;
-  const { ownerBootstrap: _secret, ...safe } = row;
+  const { ownerBootstrap: _secret, backupUriEncrypted: _backupSecret, ...safe } = row;
   return safe;
 }
 export const deletionSchema = z.object({ reason: z.string().trim().min(3).max(2000), confirmName: z.string() });

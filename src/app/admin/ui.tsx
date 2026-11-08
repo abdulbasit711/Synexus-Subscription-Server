@@ -80,6 +80,13 @@ export function AdminClient({ authenticated, businesses, plans, payments, role =
       supportExpiresAt: f.supportExpiresAt ? new Date(`${f.supportExpiresAt}T23:59:59+05:00`).toISOString() : null, reason: f.reason });
     if (saved) { setSelected(saved); await showBusiness(saved); }
   }
+  async function saveBackup(form: FormData) {
+    if (!selected) return;
+    const saved = await request(`/api/v1/admin/businesses/${selected._id}/backup`, 'PUT', {
+      enabled: form.get('enabled') === 'on', database: form.get('database'), uri: form.get('uri') || undefined, reason: form.get('reason')
+    });
+    if (saved) { await showBusiness(selected); setMessage("Backup destination saved. The ERP uses it on its next backup."); }
+  }
   async function reasonAction(b: Row, kind: string) {
     const reason = prompt(kind === "transfer" ? "Transfer revokes the old installation. Restore its database on the destination, then enroll with the new code. Enter a reason:" : "Reason for this change:");
     if (!reason) return;
@@ -116,6 +123,7 @@ export function AdminClient({ authenticated, businesses, plans, payments, role =
         const reason = prompt("Reason for correcting the bootstrap profile:"); if (!reason) return;
         await request(`/api/v1/admin/businesses/${selected._id}/bootstrap`, "PATCH", { username, reason });
       }}>Correct pending owner username</button>}
+      {role === 'owner' && <section><h3>Client backup destination</h3><p>Premium: once every seven days. Enterprise: once every 24 hours. Use a separate Atlas cluster for each client; only its latest successful backup is retained.</p><p className="muted">{selected.backupHost ? `Configured cluster: ${selected.backupHost}` : 'No Atlas connection configured'}</p><form className="stack" data-testid="backup-destination" key={`backup:${selected._id}:${selected.updatedAt}`} onSubmit={submit(saveBackup)}><label style={{ display: "flex", alignItems: "center", gap: 8 }}><input style={{ width: "auto" }} name="enabled" type="checkbox" defaultChecked={selected.backupEnabled}/>Enable this client’s backups</label><label>MongoDB SRV connection<input name="uri" type="password" autoComplete="new-password" placeholder="mongodb+srv://username:password@client-cluster.mongodb.net/"/><small>Leave blank to keep the saved connection. Credentials are encrypted and never shown in the ERP browser.</small></label><label>Database name<input name="database" defaultValue={selected.backupDatabase || ''} pattern="[a-zA-Z0-9_-]{1,63}" required/></label><label>Reason<input name="reason" minLength={3} required/></label><button disabled={busy}>Save backup destination</button></form></section>}
       <h3>Manual payments</h3><div style={{ overflowX: "auto" }}><table><thead><tr><th>Date</th><th>Purpose</th><th>Paid</th><th>Discount</th><th>Method / reference</th></tr></thead><tbody>{details?.payments?.map((p: Row) => <tr key={p._id}><td>{date(p.paidAt)}</td><td>{p.purpose}</td><td>{money(p.amount)}</td><td>{money(p.discount)}</td><td>{p.method} {p.reference}</td></tr>)}</tbody></table></div>
       <h3>Audit history</h3>{details?.events?.map((e: Row) => <p key={e._id}><small>{date(e.createdAt)}</small> | {e.type} | {e.reason}</p>)}
     </section>}

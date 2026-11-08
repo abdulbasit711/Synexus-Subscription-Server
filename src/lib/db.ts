@@ -1,5 +1,5 @@
 import mongoose, { type Connection } from "mongoose";
-import { Plan, Installation, ActivationCode, ManualPayment, MachineNonce } from './models';
+import { Business, Plan, Installation, ActivationCode, ManualPayment, MachineNonce } from './models';
 
 // Next route bundles can share globals without sharing a Mongoose connection.
 // Cache against the actual connection, and never reuse a disconnected promise.
@@ -27,7 +27,7 @@ export async function connectDb() {
       // In Mongoose 8 connect() may return immediately when another call is
       // already connecting. Wait for that connection before opening sessions.
       await connection.asPromise();
-      await Promise.all([Plan.init(), Installation.init(), ActivationCode.init(), ManualPayment.init(), MachineNonce.init()]);
+      await Promise.all([Business.init(), Plan.init(), Installation.init(), ActivationCode.init(), ManualPayment.init(), MachineNonce.init()]);
       if (connection.readyState !== 1) throw new Error("MongoDB connection is not ready");
       return mongoose;
     })().catch(error => {

@@ -10,7 +10,7 @@ export async function issueEntitlement(installationId: string, allowRevoked = fa
   const business = await Business.findById(installation.businessId);
   if (!business) throw new Error("Business not found");
   const plan = await Plan.findOne({ key: business.planKey });
-  const features = business.grantedFeatures.length ? business.grantedFeatures : planFeatures({ key: business.planKey, features: plan?.features });
+  const features = planFeatures({ key: business.planKey, features: business.grantedFeatures.length ? business.grantedFeatures : plan?.features });
   const now = new Date();
   if (business.contractVersion === 2) {
     const supported = supportActive(business.supportExpiresAt, now);
