@@ -12,7 +12,7 @@ const schema = z.object({
 });
 export async function GET() {
   const admin = await getAdminSession(); if (!admin) return fail("Unauthorized", 401);
-  await connectDb(); return ok(await Business.find().sort({ createdAt: -1 }).lean());
+  await connectDb(); return ok(await Business.find({ deletedAt: null }).sort({ createdAt: -1 }).lean());
 }
 export async function POST(request: Request) {
   const admin = await getAdminSession(); if (!admin || admin.role === "viewer") return fail("Forbidden", 403);

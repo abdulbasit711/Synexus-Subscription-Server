@@ -14,7 +14,7 @@ export async function POST(request: Request, context: { params: Promise<{ busine
   const input = schema.parse(raw);
   try {
     const result = await withMongoTransaction(async (session) => {
-      const business = await Business.findById(businessId).session(session); if (!business) throw new Error("Business not found");
+      const business = await Business.findById(businessId).session(session); if (!business || business.deletedAt) throw new Error("Business not found or deleted");
       if (business.contractVersion === 2) throw new Error("A manual payment record is required for support renewal");
       if (business.billingType === "perpetual") throw new Error("Perpetual licenses do not need renewal");
       const before = business.paidThrough; business.paidThrough = calculatePaidThrough(before, new Date(), business.billingType as never, input.terms); business.configuredStatus = "active"; await business.save({ session });

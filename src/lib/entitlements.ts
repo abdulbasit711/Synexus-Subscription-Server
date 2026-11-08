@@ -13,7 +13,7 @@ export async function issueEntitlement(installationId: string, allowRevoked = fa
   const now = new Date();
   if (business.contractVersion === 2) {
     const supported = supportActive(business.supportExpiresAt, now);
-    const status = installation.status === "revoked" || business.configuredStatus === "suspended" ? "suspended"
+    const status = business.deletedAt || installation.status === "revoked" || business.configuredStatus === "suspended" ? "suspended"
       : business.expiryPolicy === "read_only" && !supported ? "expired" : "active";
     const payload = {
       version: 2, revision: business.revision, businessId: String(business._id), installationId: String(installation._id),
@@ -30,7 +30,7 @@ export async function issueEntitlement(installationId: string, allowRevoked = fa
     installation.lastSeenAt = now; await installation.save();
     return { token, entitlement: payload };
   }
-  const status = deriveStatus({ billingType: business.billingType as never, configuredStatus: business.configuredStatus as never, paidThrough: business.paidThrough });
+  const status = business.deletedAt || installation.status === "revoked" ? "suspended" : deriveStatus({ billingType: business.billingType as never, configuredStatus: business.configuredStatus as never, paidThrough: business.paidThrough });
   const perpetual = business.billingType === "perpetual";
   const offlineValidUntil = perpetual ? null : addDays(now, 3);
   const payload = {

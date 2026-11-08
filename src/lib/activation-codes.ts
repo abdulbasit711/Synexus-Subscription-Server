@@ -6,7 +6,7 @@ import { addDays } from "./time";
 // Call inside the same transaction as registration/transfer/reissue.
 export async function createActivationCode(businessId: unknown, actorId: string, session: ClientSession | null, reason: string) {
   const options = { session: session || undefined };
-  const business = await Business.findByIdAndUpdate(businessId, { $inc: { activationGeneration: 1 } }, { ...options, new: true });
+  const business = await Business.findOneAndUpdate({ _id: businessId, deletedAt: null }, { $inc: { activationGeneration: 1 } }, { ...options, new: true });
   if (!business) throw new Error("Business not found");
   await ActivationCode.updateMany({ businessId, usedAt: null, invalidatedAt: null }, { $set: { invalidatedAt: new Date() } }, options);
   const activationCode = randomCode(), expiresAt = addDays(new Date(), 7);

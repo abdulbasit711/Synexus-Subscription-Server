@@ -19,6 +19,7 @@ export async function POST(request: NextRequest) {
         const code = await ActivationCode.findOne({ codeHash: sha256(input.activationCode), usedAt: null, expiresAt: { $gt: new Date() } }).session(session);
         if (!code || code.invalidatedAt) throw new Error("Activation code is invalid, used, or expired");
         const business = await Business.findById(code.businessId).session(session);
+        if (!business || business.deletedAt) throw new Error("Business not found or deleted");
         if (business?.contractVersion === 2) throw new Error("Update the ERP to enroll this agreement");
         const existing = await Installation.findOne({ businessId: code.businessId, status: "active" }).session(session);
         if (existing) throw new Error("This business already has an active ERP installation");

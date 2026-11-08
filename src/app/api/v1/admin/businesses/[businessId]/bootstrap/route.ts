@@ -13,7 +13,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ busin
     const passwordHash = input.password ? await bcrypt.hash(input.password, 10) : null;
     await withMongoTransaction(async session => {
       const business = await Business.findById(businessId).select('+ownerBootstrap').session(session);
-      if (!business?.ownerBootstrap || business.provisioningMode !== 'provision') throw new Error('No pending owner bootstrap profile exists');
+      if (!business || business.deletedAt) throw new Error('Business not found or deleted');
+      if (!business.ownerBootstrap || business.provisioningMode !== 'provision') throw new Error('No pending owner bootstrap profile exists');
       if (await Installation.exists({ businessId, provisioningCompleteAt: { $ne: null } }).session(session)) throw new Error('Provisioning is complete; existing local credentials are managed by the owner');
       business.ownerBootstrap = { ...business.ownerBootstrap, username: input.username, ...(passwordHash ? { passwordHash } : {}) };
       business.markModified('ownerBootstrap'); await business.save({ session });

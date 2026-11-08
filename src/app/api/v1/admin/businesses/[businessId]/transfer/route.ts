@@ -11,7 +11,7 @@ export async function POST(request: Request, context: { params: Promise<{ busine
     const input = z.object({ reason: z.string().trim().min(3), mode: z.enum(["enroll", "provision"]).default("enroll") }).parse(await request.json());
     await connectDb(); const { businessId } = await context.params;
     return ok(await withMongoTransaction(async session => {
-      const business = await Business.findById(businessId).select("+ownerBootstrap").session(session); if (!business) throw new Error("Business not found");
+      const business = await Business.findById(businessId).select("+ownerBootstrap").session(session); if (!business || business.deletedAt) throw new Error("Business not found or deleted");
       if (input.mode === "provision" && !business.ownerBootstrap?.passwordHash) throw new Error("No bootstrap owner exists; transfer with the restored business database");
       await Installation.updateMany({ businessId, status: "active" }, { $set: { status: "revoked" } }, { session: session || undefined });
       business.activeInstallationId = null; business.provisioningMode = input.mode; business.revision += 1; await business.save({ session });

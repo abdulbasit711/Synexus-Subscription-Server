@@ -4,8 +4,8 @@ import { randomUUID, generateKeyPairSync, sign, createHash } from 'node:crypto';
 import mongoose from 'mongoose';
 import { NextRequest } from 'next/server';
 import { upgradeCharge, supportActive, ensureDefaultPlans } from './catalog';
-import { registrationSchema, registerBusiness, paymentSchema, renewSupport, changePlan } from './management';
-import { Business, Installation, Plan, ActivationCode, ManualPayment } from './models';
+import { registrationSchema, registerBusiness, paymentSchema, renewSupport, changePlan, deleteBusiness, deletionSchema } from './management';
+import { Business, Installation, Plan, ActivationCode, ManualPayment, SubscriptionEvent } from './models';
 import { claimInstallation, completeProvisioning, provisioningManifest } from './provisioning';
 import { issueEntitlement } from './entitlements';
 import { createActivationCode } from './activation-codes';
@@ -18,6 +18,10 @@ test('upgrade price differences and support boundaries', () => {
 });
 test('new registration requires owner credentials and an explicit expiry policy', () => {
   assert.equal(registrationSchema.safeParse({ contractVersion: 2, name: 'Client', region: 'Karachi', planKey: 'basic', provisioningMode: 'provision', expiryPolicy: 'keep_working' }).success, false);
+});
+test('deletion requires a reason and an explicit name confirmation', () => {
+  assert.equal(deletionSchema.safeParse({ reason: '  ', confirmName: 'Client' }).success, false);
+  assert.equal(deletionSchema.safeParse({ reason: 'Duplicate registration' }).success, false);
 });
 const integration = process.env.MONGODB_URI?.includes('/pandas_license_test_') ? describe : describe.skip;
 integration('Synexus transactions and provisioning', () => {
@@ -88,5 +92,40 @@ integration('Synexus transactions and provisioning', () => {
     const ongoing = await issueEntitlement(installationId); assert.equal(ongoing.entitlement.status, 'active'); assert.equal(ongoing.entitlement.supportStatus, 'expired');
     await Business.updateOne({ _id: id }, { $set: { expiryPolicy: 'read_only' } }); assert.equal((await issueEntitlement(installationId)).entitlement.status, 'expired');
     await Installation.updateOne({ _id: installationId }, { $set: { status: 'revoked' } }); assert.equal((await issueEntitlement(installationId, true)).entitlement.status, 'suspended');
+  });
+  test('deletion confirms the name, revokes access and codes, retains history, and is idempotent', async () => {
+    const created = await register(); const id = String(created.business._id);
+    const installationId = await claim(created.activationCode).execute(); await completeProvisioning(installationId);
+    await changePlan(id, { ...payment(15000), planKey: 'premium' }, actor);
+    await changePlan(id, { ...payment(0), planKey: 'basic' }, actor);
+    const replacement = await withMongoTransaction(session => createActivationCode(id, actor, session, 'Replacement for deletion test'));
+    const before = await Business.findById(id); const input = { confirmName: String(created.business.name), reason: 'Client registration removed' };
+    await assert.rejects(deleteBusiness(id, { ...input, confirmName: 'Wrong name' }, actor), /exactly/);
+    assert.equal((await Business.findById(id))!.deletedAt, null);
+    await deleteBusiness(id, input, actor); await deleteBusiness(id, input, actor);
+    const deleted = await Business.findById(id);
+    assert.ok(deleted!.deletedAt); assert.equal(deleted!.configuredStatus, 'suspended');
+    assert.equal(deleted!.revision, before!.revision + 1); assert.equal(deleted!.requestedPlan, null); assert.equal(deleted!.activeInstallationId, null);
+    assert.equal(await Business.countDocuments({ _id: id, deletedAt: null }), 0);
+    assert.equal((await Installation.findById(installationId))!.status, 'revoked');
+    assert.equal(await ActivationCode.countDocuments({ businessId: id, usedAt: null, invalidatedAt: null }), 0);
+    assert.equal(await ManualPayment.countDocuments({ businessId: id }), 2);
+    assert.equal(await SubscriptionEvent.countDocuments({ businessId: id, type: 'business_deleted' }), 1);
+    assert.equal((await issueEntitlement(installationId, true)).entitlement.status, 'suspended');
+    await assert.rejects(claim(replacement.activationCode).execute(), /invalid/);
+    await assert.rejects(claim(created.activationCode).execute(), /used/);
+    await assert.rejects(withMongoTransaction(session => createActivationCode(id, actor, session, 'Cannot reissue')), /not found/);
+    await assert.rejects(changePlan(id, { ...payment(15000), planKey: 'enterprise' }, actor), /deleted/);
+    await assert.rejects(renewSupport(id, { ...payment(15000), terms: 1 }, actor), /deleted/);
+    await assert.rejects(provisioningManifest(installationId), /not active/);
+  });
+  test('deleting an unactivated or legacy business also blocks activation and access', async () => {
+    const created = await register(); const id = String(created.business._id);
+    await deleteBusiness(id, { confirmName: String(created.business.name), reason: 'Duplicate business' }, actor);
+    await assert.rejects(claim(created.activationCode).execute(), /invalid/);
+    const legacy = await Business.create({ name: 'Legacy client', planKey: 'basic', billingType: 'perpetual' });
+    const installation = await Installation.create({ businessId: legacy._id, publicKey: pair.publicKey });
+    await deleteBusiness(String(legacy._id), { confirmName: legacy.name, reason: 'Legacy client removed' }, actor);
+    assert.equal((await issueEntitlement(String(installation._id), true)).entitlement.status, 'suspended');
   });
 });

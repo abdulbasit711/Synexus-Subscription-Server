@@ -1,6 +1,6 @@
 import { z } from "zod";
 import bcrypt from "bcryptjs";
-import { Business, Plan, ManualPayment, SubscriptionEvent } from "./models";
+import { Business, Plan, ManualPayment, SubscriptionEvent, Installation, ActivationCode } from "./models";
 import { PLAN_KEYS, ensureDefaultPlans, upgradeCharge } from "./catalog";
 import { calculatePaidThrough } from "./contracts";
 import { createActivationCode } from "./activation-codes";
@@ -40,6 +40,25 @@ export function publicBusiness(value: { toObject?: () => unknown } | unknown) {
   const { ownerBootstrap: _secret, ...safe } = row;
   return safe;
 }
+export const deletionSchema = z.object({ reason: z.string().trim().min(3).max(2000), confirmName: z.string() });
+export async function deleteBusiness(businessId: string, input: z.infer<typeof deletionSchema>, actorId: string) {
+  return withMongoTransaction(async session => {
+    const business = await Business.findById(businessId).session(session);
+    if (!business) throw new Error("Business not found");
+    if (input.confirmName !== business.name) throw new Error("Enter the business name exactly to confirm deletion");
+    if (business.deletedAt) return publicBusiness(business);
+    const before = publicBusiness(business);
+    const now = new Date(), options = { session: session || undefined };
+    business.deletedAt = now; business.configuredStatus = "suspended"; business.requestedPlan = null;
+    business.activeInstallationId = null; business.activationGeneration += 1; business.revision += 1;
+    await business.save({ session });
+    await Installation.updateMany({ businessId, status: "active" }, { $set: { status: "revoked" } }, options);
+    await ActivationCode.updateMany({ businessId, usedAt: null, invalidatedAt: null }, { $set: { invalidatedAt: now } }, options);
+    await SubscriptionEvent.create([{ businessId, type: "business_deleted", actorType: "admin", actorId, reason: input.reason,
+      before, after: { deletedAt: now, configuredStatus: business.configuredStatus } }], options);
+    return publicBusiness(business);
+  });
+}
 export const paymentSchema = z.object({
   requestId: z.string().uuid(), amount: z.number().nonnegative(), discount: z.number().nonnegative().default(0),
   method: z.enum(["cash", "bank_transfer", "other", "waiver"]), reference: z.string().max(200).default(""),
@@ -55,7 +74,8 @@ export async function recordPayment(businessId: unknown, purpose: string, expect
 export async function renewSupport(businessId: string, input: PaymentInput & { terms: number }, actorId: string) {
   return withMongoTransaction(async session => {
     const business = await Business.findById(businessId).session(session);
-    if (!business || business.contractVersion !== 2) throw new Error("Review and migrate this agreement before renewing support");
+    if (!business || business.deletedAt) throw new Error("Business not found or deleted");
+    if (business.contractVersion !== 2) throw new Error("Review and migrate this agreement before renewing support");
     if (await ManualPayment.exists({ businessId, requestId: input.requestId }).session(session)) return publicBusiness(business);
     if (!business.firstActivatedAt && business.provisioningMode === "provision") throw new Error("First support year starts at activation; it is already included");
     const before = business.supportExpiresAt;
@@ -72,7 +92,8 @@ export async function renewSupport(businessId: string, input: PaymentInput & { t
 export async function changePlan(businessId: string, input: PaymentInput & { planKey: typeof PLAN_KEYS[number] }, actorId: string) {
   return withMongoTransaction(async session => {
     const business = await Business.findById(businessId).session(session);
-    if (!business || business.contractVersion !== 2) throw new Error("Review and migrate this agreement before changing plans");
+    if (!business || business.deletedAt) throw new Error("Business not found or deleted");
+    if (business.contractVersion !== 2) throw new Error("Review and migrate this agreement before changing plans");
     if (await ManualPayment.exists({ businessId, requestId: input.requestId }).session(session)) return publicBusiness(business);
     if (business.requestedPlan) throw new Error("A downgrade is already pending; cancel it before requesting another change");
     const target = await Plan.findOne({ key: input.planKey, active: true }).session(session);

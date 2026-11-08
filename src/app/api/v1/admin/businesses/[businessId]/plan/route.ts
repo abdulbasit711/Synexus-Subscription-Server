@@ -16,7 +16,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ busi
   try {
     const { reason } = z.object({ reason: z.string().trim().min(3) }).parse(await request.json()); await connectDb(); const { businessId } = await context.params;
     return ok(await withMongoTransaction(async session => {
-      const business = await Business.findById(businessId).session(session); if (!business) throw new Error("Business not found");
+      const business = await Business.findById(businessId).session(session); if (!business || business.deletedAt) throw new Error("Business not found or deleted");
       const before = business.requestedPlan; business.requestedPlan = null; business.revision += 1; await business.save({ session });
       await SubscriptionEvent.create([{ businessId, type: "downgrade_cancelled", actorType: "admin", actorId: admin.sub, reason, before }], { session: session || undefined }); return business;
     }));

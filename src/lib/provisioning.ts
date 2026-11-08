@@ -23,7 +23,8 @@ export async function claimInstallation(request: NextRequest, raw: string) {
     }
     if (code.invalidatedAt || code.expiresAt <= new Date()) throw new Error("Activation code is invalid, used, or expired");
     const business = await Business.findById(code.businessId).session(session);
-    if (!business || business.contractVersion !== 2 || !business.expiryPolicy) throw new Error("This client agreement requires review in Synexus before enrollment");
+    if (!business || business.deletedAt) throw new Error("Business not found or deleted");
+    if (business.contractVersion !== 2 || !business.expiryPolicy) throw new Error("This client agreement requires review in Synexus before enrollment");
     if (input.expectedBusinessId && String(business._id) !== input.expectedBusinessId) throw new Error("This code belongs to a different cloud client");
     if (input.mode === 'enroll' && !input.expectedBusinessId && business.name.trim().toLowerCase().replace(/\s+/g, ' ') !== input.existingBusinessName?.trim().toLowerCase().replace(/\s+/g, ' ')) throw new Error("Business name does not match the cloud registration; correct it in Synexus before enrollment");
     if (business.provisioningMode !== input.mode) throw new Error("This code is for a different setup mode");

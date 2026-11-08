@@ -4,6 +4,14 @@ import { connectDb, DatabaseUnavailableError } from "@/lib/db";
 import { Business, Plan, SubscriptionEvent, Installation, ManualPayment } from "@/lib/models";
 import { withMongoTransaction } from "@/lib/transaction";
 import { fail, ok } from "@/lib/http";
+import { deleteBusiness, deletionSchema } from "@/lib/management";
+export async function DELETE(request: Request, context: { params: Promise<{ businessId: string }> }) {
+  const admin = await getAdminSession(); if (!admin || admin.role !== "owner") return fail("Owner access required", 403);
+  try {
+    const input = deletionSchema.parse(await request.json()); const { businessId } = await context.params;
+    return ok(await deleteBusiness(businessId, input, admin.sub));
+  } catch (error) { return fail(error instanceof Error ? error.message : "Deletion failed", error instanceof DatabaseUnavailableError ? 503 : 400); }
+}
 const schema = z.object({ configuredStatus: z.enum(["active", "suspended", "legacy_unmanaged"]).optional(),
   paidThrough: z.string().datetime().nullable().optional(), negotiatedPrice: z.number().nonnegative().nullable().optional(), agreementNotes: z.string().max(4000).optional(),
   reason: z.string().trim().min(3), contractVersion: z.literal(2).optional(), expiryPolicy: z.enum(["keep_working", "read_only"]).optional(),
@@ -13,7 +21,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ busin
   try {
     await connectDb(); const input = schema.parse(await request.json()); const { businessId } = await context.params;
     return ok(await withMongoTransaction(async session => {
-      const business = await Business.findById(businessId).session(session); if (!business) throw new Error("Business not found");
+      const business = await Business.findById(businessId).session(session); if (!business || business.deletedAt) throw new Error("Business not found or deleted");
       const before = business.toObject();
       if (business.contractVersion !== 2 && input.contractVersion === 2) {
         if (!input.expiryPolicy || input.supportExpiresAt === undefined || !input.region) throw new Error("Explicit support dates, expiry policy and business region are required for migration");

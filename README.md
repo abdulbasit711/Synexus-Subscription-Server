@@ -22,6 +22,9 @@ Installation includes the first support year, starting at completed activation.
 Annual support expiry and ERP access are separate. Every business requires a
 successful verification every 30 days. Downgrades wait for local staff reduction.
 Manual payment records use idempotency IDs; renewal does not remove suspension.
+Client rows provide direct Change plan and owner-only Delete actions. Deletion
+requires the exact business name and a reason, revokes installation access and
+unused activation codes, and retains payment and audit history.
 Online checkout and EasyPaisa callbacks are disabled (HTTP 410).
 
 `npm test` runs unit tests. `node ../scripts/test-synexus.mjs` from this directory

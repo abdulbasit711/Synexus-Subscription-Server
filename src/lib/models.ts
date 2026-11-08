@@ -12,6 +12,7 @@ const planSchema = new Schema({
 }, { timestamps: true });
 
 const businessSchema = new Schema({
+  deletedAt: { type: Date, default: null },
   contractVersion: { type: Number, default: 1 }, region: { type: String, default: "" },
   provisioningMode: { type: String, enum: ["provision", "enroll"], default: "enroll" },
   ownerBootstrap: { type: Schema.Types.Mixed, select: false },
