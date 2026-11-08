@@ -3,7 +3,7 @@ import { test, describe, before, after } from 'node:test';
 import { randomUUID, generateKeyPairSync, sign, createHash } from 'node:crypto';
 import mongoose from 'mongoose';
 import { NextRequest } from 'next/server';
-import { upgradeCharge, supportActive, ensureDefaultPlans } from './catalog';
+import { upgradeCharge, supportActive, ensureDefaultPlans, planFeatures, PREMIUM_FEATURES, ENTERPRISE_FEATURES } from './catalog';
 import { registrationSchema, registerBusiness, paymentSchema, renewSupport, changePlan, deleteBusiness, deletionSchema } from './management';
 import { Business, Installation, Plan, ActivationCode, ManualPayment, SubscriptionEvent } from './models';
 import { claimInstallation, completeProvisioning, provisioningManifest } from './provisioning';
@@ -23,6 +23,12 @@ test('deletion requires a reason and an explicit name confirmation', () => {
   assert.equal(deletionSchema.safeParse({ reason: '  ', confirmName: 'Client' }).success, false);
   assert.equal(deletionSchema.safeParse({ reason: 'Duplicate registration' }).success, false);
 });
+test('blank legacy catalogs supply included plan features while explicit selections are retained', () => {
+  assert.deepEqual(planFeatures({ key: 'basic', features: [] }), []);
+  assert.deepEqual(planFeatures({ key: 'premium', features: [] }), PREMIUM_FEATURES);
+  assert.deepEqual(planFeatures({ key: 'enterprise' }), ENTERPRISE_FEATURES);
+  assert.deepEqual(planFeatures({ key: 'premium', features: ['advancedReports'] }), ['advancedReports']);
+});
 const integration = process.env.MONGODB_URI?.includes('/pandas_license_test_') ? describe : describe.skip;
 integration('Synexus transactions and provisioning', () => {
   const actor = new mongoose.Types.ObjectId().toString();
@@ -39,6 +45,29 @@ integration('Synexus transactions and provisioning', () => {
     const request = new NextRequest('https://example.test/api/v1/installations/activate', { method: 'POST', body: raw, headers: { 'x-timestamp': timestamp, 'x-nonce': nonce, 'x-signature': signature } });
     return { payload, execute: () => claimInstallation(request, raw) };
   }
+  test('legacy catalog repair preserves negotiated prices, names, quotas and nonempty feature selections', async () => {
+    const original = (await Plan.findOne({ key: 'premium' }))!.toObject();
+    try {
+      await Plan.updateOne({ key: 'premium' }, { $set: { features: [], name: 'Negotiated Premium', installationPrice: 29000, annualPrice: 13000, userLimit: 5 } });
+      await ensureDefaultPlans();
+      const repaired = (await Plan.findOne({ key: 'premium' }))!;
+      assert.deepEqual([...repaired.features], PREMIUM_FEATURES);
+      assert.equal(repaired.name, 'Negotiated Premium'); assert.equal(repaired.installationPrice, 29000);
+      assert.equal(repaired.annualPrice, 13000); assert.equal(repaired.userLimit, 5);
+      await Plan.updateOne({ key: 'premium' }, { $set: { features: ['advancedReports'] } });
+      await ensureDefaultPlans(); assert.deepEqual([...(await Plan.findOne({ key: 'premium' }))!.features], ['advancedReports']);
+    } finally { await Plan.replaceOne({ key: 'premium' }, original); }
+  });
+  test('signed entitlements include all plan features even before a blank legacy catalog is repaired', async () => {
+    for (const [planKey, expected] of [['basic', []], ['premium', PREMIUM_FEATURES], ['enterprise', ENTERPRISE_FEATURES]] as const) {
+      const created = await register({ planKey }); const installationId = await claim(created.activationCode).execute();
+      const original = (await Plan.findOne({ key: planKey }))!.features;
+      try {
+        await Plan.updateOne({ key: planKey }, { $set: { features: [] } });
+        assert.deepEqual((await issueEntitlement(installationId)).entitlement.features, expected);
+      } finally { await Plan.updateOne({ key: planKey }, { $set: { features: original } }); }
+    }
+  });
   test('registration redacts bootstrap hash; activation starts exactly one included support year', async () => {
     const created = await register(); assert.equal('ownerBootstrap' in created.business, false);
     const id = String(created.business._id); assert.equal((await Business.findById(id))!.supportExpiresAt, null);

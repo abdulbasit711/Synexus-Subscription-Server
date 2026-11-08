@@ -1,7 +1,7 @@
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { Business, Plan, ManualPayment, SubscriptionEvent, Installation, ActivationCode } from "./models";
-import { PLAN_KEYS, ensureDefaultPlans, upgradeCharge } from "./catalog";
+import { PLAN_KEYS, ensureDefaultPlans, upgradeCharge, planFeatures } from "./catalog";
 import { calculatePaidThrough } from "./contracts";
 import { createActivationCode } from "./activation-codes";
 import { withMongoTransaction } from "./transaction";
@@ -104,7 +104,7 @@ export async function changePlan(businessId: string, input: PaymentInput & { pla
     const before = { planKey: business.planKey, userLimit: business.userLimit };
     if (lower) {
       business.requestedPlan = { id: input.requestId, planKey: target.key, userLimit: target.userLimit,
-        installationPrice: target.installationPrice, annualSupportPrice: target.annualPrice, features: target.features, requestedAt: new Date(), reason: input.reason };
+        installationPrice: target.installationPrice, annualSupportPrice: target.annualPrice, features: planFeatures(target), requestedAt: new Date(), reason: input.reason };
     } else {
       business.planKey = target.key; business.userLimit = target.userLimit;
       business.installationPrice = target.installationPrice; business.annualSupportPrice = target.annualPrice;
